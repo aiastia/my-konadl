@@ -285,10 +285,14 @@ def main():
                     print(f"  ⏭️  跳过已发送: {pid}")
                     continue
 
-                preview = p.get("preview_url")
+                # sample_url: 中等质量示例图，比 preview 清晰
+                sample = p.get("sample_url") or p.get("preview_url")
+                # jpeg_url: JPEG 版原图，比 file_url (PNG) 小很多
+                jpeg = p.get("jpeg_url") or p.get("file_url")
+                # file_url: 原始文件（备用）
                 original = p.get("file_url")
 
-                if not preview or not original:
+                if not sample or not original:
                     continue
 
                 # 构建消息
@@ -317,18 +321,18 @@ def main():
 
                 print(f"  📤 发送: {pid} (rating:{rating})")
 
-                # 发送预览图（下载后上传）
-                tg_send_photo(preview, caption)
+                # 发送示例图作为预览（比 preview_url 更清晰）
+                tg_send_photo(sample, caption)
 
-                # 检查原图大小
-                size = get_file_size(original)
-                print(f"  📦 原图大小: {size / 1024 / 1024:.1f} MB")
+                # 检查 JPEG 原图大小（比 PNG file_url 小很多）
+                jpeg_size = get_file_size(jpeg)
+                print(f"  📦 JPEG 大小: {jpeg_size / 1024 / 1024:.1f} MB")
 
-                if 0 < size <= MAX_FILE_SIZE:
-                    tg_send_file(original, caption)
+                if 0 < jpeg_size <= MAX_FILE_SIZE:
+                    tg_send_file(jpeg, caption)
                 else:
-                    if size > MAX_FILE_SIZE:
-                        print(f"  ⚠️  原图过大 ({size / 1024 / 1024:.1f} MB)，跳过")
+                    if jpeg_size > MAX_FILE_SIZE:
+                        print(f"  ⚠️  JPEG 过大 ({jpeg_size / 1024 / 1024:.1f} MB)，跳过")
                     else:
                         print(f"  ⚠️  无法获取文件大小，跳过原图")
 
