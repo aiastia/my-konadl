@@ -2,6 +2,8 @@ import requests
 import cloudscraper
 import json
 import os
+import sys
+import tempfile
 from datetime import datetime, timezone, timedelta
 from config import *
 
@@ -15,6 +17,27 @@ SITES = [
 TZ = timezone(timedelta(hours=8))
 
 scraper = cloudscraper.create_scraper()
+
+# TG API 基础 URL
+TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def check_bot_token():
+    """验证 Bot Token 是否有效"""
+    print("🔐 验证 Bot Token...")
+    try:
+        r = requests.get(f"{TG_API}/getMe", timeout=10)
+        data = r.json()
+        if data.get("ok"):
+            bot_name = data["result"].get("username", "unknown")
+            print(f"✅ Bot 验证成功: @{bot_name}")
+            return True
+        else:
+            print(f"❌ Bot Token 无效: {data.get('description', '未知错误')}")
+            return False
+    except Exception as e:
+        print(f"❌ 无法连接 Telegram API: {e}")
+        return False
 
 
 def safe_get(url, params=None):
@@ -39,6 +62,35 @@ def safe_get(url, params=None):
     return None
 
 
+def download_file(url):
+    """下载文件到临时路径，返回文件路径"""
+    try:
+        r = requests.get(url, timeout=30, stream=True)
+        if r.status_code == 200:
+            ext = url.split(".")[-1][:4]  # 取扩展名
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+            for chunk in r.iter_content(chunk_size=8192):
+                tmp.write(chunk)
+            tmp.close()
+            return tmp.name
+    except:
+        pass
+
+    try:
+        r = scraper.get(url, timeout=30, stream=True)
+        if r.status_code == 200:
+            ext = url.split(".")[-1][:4]
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+            for chunk in r.iter_content(chunk_size=8192):
+                tmp.write(chunk)
+            tmp.close()
+            return tmp.name
+    except:
+        pass
+
+    return None
+
+
 def load_db():
     """加载已发送 ID 数据库"""
     if not os.path.exists("db.json"):
@@ -53,50 +105,83 @@ def save_db(db):
         json.dump(list(db), f, indent=2)
 
 
-def tg_send_photo(url, caption=""):
-    """发送预览图到 Telegram"""
+def tg_send_photo(image_url, caption=""):
+    """下载预览图并发送到 Telegram"""
+    print(f"  ⬇️  下载预览图...")
+    file_path = download_file(image_url)
+    if not file_path:
+        print(f"  ❌ 预览图下载失败")
+        return False
+
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-            data={
-                "chat_id": CHAT_ID,
-                "photo": url,
-                "caption": caption,
-                "parse_mode": "HTML"
-            },
-            timeout=30
-        )
+        with open(file_path, "rb") as f:
+            r = requests.post(
+                f"{TG_API}/sendPhoto",
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                },
+                files={"photo": f},
+                timeout=60
+            )
         if r.status_code == 200:
             print(f"  ✅ 预览图发送成功")
+            return True
         else:
-            print(f"  ❌ 预览图发送失败: {r.text}")
-        return r
+            print(f"  ❌ 预览图发送失败: {r.text[:200]}")
+            return False
     except Exception as e:
         print(f"  ❌ 预览图发送异常: {e}")
-        return None
+        return False
+    finally:
+        try:
+            os.unlink(file_path)
+        except:
+            pass
 
 
-def tg_send_file(url, caption=""):
-    """发送原图文件到 Telegram"""
+def tg_send_file(image_url, caption=""):
+    """下载原图并发送到 Telegram"""
+    print(f"  ⬇️  下载原图...")
+    file_path = download_file(image_url)
+    if not file_path:
+        print(f"  ❌ 原图下载失败")
+        return False
+
+    # 检查下载后的实际文件大小
+    actual_size = os.path.getsize(file_path)
+    if actual_size > MAX_FILE_SIZE:
+        print(f"  ⚠️  下载后文件过大 ({actual_size / 1024 / 1024:.1f} MB)，跳过")
+        os.unlink(file_path)
+        return False
+
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-            data={
-                "chat_id": CHAT_ID,
-                "document": url,
-                "caption": caption,
-                "parse_mode": "HTML"
-            },
-            timeout=60
-        )
+        with open(file_path, "rb") as f:
+            r = requests.post(
+                f"{TG_API}/sendDocument",
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                },
+                files={"document": f},
+                timeout=120
+            )
         if r.status_code == 200:
             print(f"  ✅ 原图发送成功")
+            return True
         else:
-            print(f"  ❌ 原图发送失败: {r.text}")
-        return r
+            print(f"  ❌ 原图发送失败: {r.text[:200]}")
+            return False
     except Exception as e:
         print(f"  ❌ 原图发送异常: {e}")
-        return None
+        return False
+    finally:
+        try:
+            os.unlink(file_path)
+        except:
+            pass
 
 
 def get_file_size(url):
@@ -135,6 +220,11 @@ def fetch_page(site_url, tags_with_date, page):
 
 
 def main():
+    # 验证 Bot Token
+    if not check_bot_token():
+        print("⛔ 请检查 config.py 中的 BOT_TOKEN 是否正确！")
+        sys.exit(1)
+
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     print(f"📅 当天日期: {today}")
     print(f"🏷️  标签: {TAGS}")
@@ -198,7 +288,6 @@ def main():
                 ]
 
                 if tags:
-                    # 截断过长的 tags
                     tag_display = tags[:200] + "..." if len(tags) > 200 else tags
                     caption_lines.append(f"🏷 <b>Tags</b>: {tag_display}")
 
@@ -211,7 +300,7 @@ def main():
 
                 print(f"  📤 发送: {pid}")
 
-                # 发送预览图
+                # 发送预览图（下载后上传）
                 tg_send_photo(preview, caption)
 
                 # 检查原图大小
