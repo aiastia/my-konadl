@@ -91,18 +91,23 @@ def download_file(url):
     return None
 
 
-def load_db():
-    """加载已发送 ID 数据库"""
+def load_db(today_str):
+    """加载已发送 ID 数据库（只保留当天的，自动清理旧数据）"""
     if not os.path.exists("db.json"):
         return set()
     with open("db.json", "r") as f:
-        return set(json.load(f))
+        data = json.load(f)
+    # 如果是新的一天，清空旧数据
+    if isinstance(data, dict):
+        if data.get("date") == today_str:
+            return set(data.get("ids", []))
+    return set()
 
 
-def save_db(db):
-    """保存已发送 ID 数据库"""
+def save_db(db, today_str):
+    """保存已发送 ID 数据库（带日期，每天自动覆盖）"""
     with open("db.json", "w") as f:
-        json.dump(list(db), f, indent=2)
+        json.dump({"date": today_str, "ids": list(db)}, f, indent=2)
 
 
 def tg_send_photo(image_url, caption=""):
@@ -235,7 +240,7 @@ def main():
     print(f"📅 当天日期: {today}")
     print(f"🏷️  标签: {TAGS}")
 
-    db = load_db()
+    db = load_db(today)
     print(f"💾 已有记录: {len(db)} 条")
 
     total_sent = 0
@@ -346,12 +351,12 @@ def main():
                 break
 
             # 页间保存，防止中途失败丢数据
-            save_db(db)
+            save_db(db, today)
 
         if not site_succeeded:
             site_succeeded = True
 
-    save_db(db)
+    save_db(db, today)
     print(f"\n🎉 完成！共发送 {total_sent} 条新内容")
     print(f"💾 数据库现有 {len(db)} 条记录")
 
