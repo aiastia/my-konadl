@@ -67,7 +67,7 @@ def download_file(url):
     try:
         r = requests.get(url, timeout=30, stream=True)
         if r.status_code == 200:
-            ext = url.split(".")[-1][:4]  # 取扩展名
+            ext = url.split(".")[-1][:4]
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
             for chunk in r.iter_content(chunk_size=8192):
                 tmp.write(chunk)
@@ -149,7 +149,6 @@ def tg_send_file(image_url, caption=""):
         print(f"  ❌ 原图下载失败")
         return False
 
-    # 检查下载后的实际文件大小
     actual_size = os.path.getsize(file_path)
     if actual_size > MAX_FILE_SIZE:
         print(f"  ⚠️  下载后文件过大 ({actual_size / 1024 / 1024:.1f} MB)，跳过")
@@ -200,10 +199,17 @@ def get_file_size(url):
         return 0
 
 
-def fetch_page(site_url, tags_with_date, page):
-    """抓取单页数据"""
+def is_today(timestamp):
+    """检查 Unix 时间戳是否是今天（UTC+8）"""
+    dt = datetime.fromtimestamp(timestamp, tz=TZ)
+    today = datetime.now(TZ)
+    return dt.date() == today.date()
+
+
+def fetch_page(site_url, page):
+    """抓取单页数据（不带日期过滤，在代码中过滤）"""
     params = {
-        "tags": tags_with_date,
+        "tags": TAGS,
         "limit": LIMIT,
         "page": page
     }
@@ -229,10 +235,6 @@ def main():
     print(f"📅 当天日期: {today}")
     print(f"🏷️  标签: {TAGS}")
 
-    # 拼接日期过滤标签
-    tags_with_date = f"{TAGS} date:{today}"
-    print(f"🔍 查询标签: {tags_with_date}")
-
     db = load_db()
     print(f"💾 已有记录: {len(db)} 条")
 
@@ -247,7 +249,7 @@ def main():
 
         for page in range(1, MAX_PAGES + 1):
             print(f"\n📄 第 {page} 页")
-            posts = fetch_page(site, tags_with_date, page)
+            posts = fetch_page(site, page)
 
             if posts is None:
                 print(f"❌ 请求失败，切换备选站点")
@@ -260,11 +262,24 @@ def main():
 
             print(f"📬 获取到 {len(posts)} 条结果")
 
+            today_count = 0
+            old_count = 0
+
             for p in posts:
                 pid = str(p.get("id", ""))
+                created_at = p.get("created_at", 0)
 
                 if not pid:
                     continue
+
+                # 检查是否是今天的内容
+                if not is_today(created_at):
+                    created_str = datetime.fromtimestamp(created_at, tz=TZ).strftime("%Y-%m-%d %H:%M")
+                    print(f"  ⏭️  非当天内容: {pid} (创建于 {created_str})")
+                    old_count += 1
+                    continue
+
+                today_count += 1
 
                 if pid in db:
                     print(f"  ⏭️  跳过已发送: {pid}")
@@ -280,10 +295,12 @@ def main():
                 tags = p.get("tags", "").strip()
                 source = p.get("source", "")
                 score = p.get("score", 0)
+                rating = p.get("rating", "?")
 
                 caption_lines = [
                     f"🖼 <b>ID</b>: <code>{pid}</code>",
                     f"⭐ <b>Score</b>: {score}",
+                    f"🔒 <b>Rating</b>: {rating}",
                     f"📅 <b>Date</b>: {today}",
                 ]
 
@@ -298,7 +315,7 @@ def main():
 
                 caption = "\n".join(caption_lines)
 
-                print(f"  📤 发送: {pid}")
+                print(f"  📤 发送: {pid} (rating:{rating})")
 
                 # 发送预览图（下载后上传）
                 tg_send_photo(preview, caption)
@@ -318,10 +335,19 @@ def main():
                 db.add(pid)
                 total_sent += 1
 
+            print(f"  📊 本页统计: 当天 {today_count} 条, 非当天 {old_count} 条")
+
+            # 如果本页没有当天内容，说明已经超出今天的范围，停止翻页
+            if today_count == 0 and old_count > 0:
+                print(f"📭 本页无当天内容，停止翻页")
+                site_succeeded = True
+                break
+
             # 页间保存，防止中途失败丢数据
             save_db(db)
 
-        site_succeeded = True
+        if not site_succeeded:
+            site_succeeded = True
 
     save_db(db)
     print(f"\n🎉 完成！共发送 {total_sent} 条新内容")
