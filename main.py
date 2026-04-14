@@ -91,23 +91,23 @@ def download_file(url):
     return None
 
 
-def load_db(today_str):
-    """加载已发送 ID 数据库（只保留当天的，自动清理旧数据）"""
+def load_db():
+    """加载已发送 ID 数据库"""
     if not os.path.exists("db.json"):
         return set()
     with open("db.json", "r") as f:
         data = json.load(f)
-    # 如果是新的一天，清空旧数据
     if isinstance(data, dict):
-        if data.get("date") == today_str:
-            return set(data.get("ids", []))
+        return set(data.get("ids", []))
+    if isinstance(data, list):
+        return set(data)
     return set()
 
 
-def save_db(db, today_str):
-    """保存已发送 ID 数据库（带日期，每天自动覆盖）"""
+def save_db(db):
+    """保存已发送 ID 数据库"""
     with open("db.json", "w") as f:
-        json.dump({"date": today_str, "ids": list(db)}, f, indent=2)
+        json.dump({"ids": list(db)}, f, indent=2)
 
 
 def tg_send_photo(image_url, caption=""):
@@ -204,15 +204,16 @@ def get_file_size(url):
         return 0
 
 
-def is_today(timestamp):
-    """检查 Unix 时间戳是否是今天（UTC+8）"""
+def is_within_range(timestamp):
+    """检查 Unix 时间戳是否在最近 N 天内（UTC+8）"""
     dt = datetime.fromtimestamp(timestamp, tz=TZ)
-    today = datetime.now(TZ)
-    return dt.date() == today.date()
+    now = datetime.now(TZ)
+    start = (now - timedelta(days=DAYS_BACK)).replace(hour=0, minute=0, second=0)
+    return dt >= start
 
 
 def fetch_page(site_url, page):
-    """抓取单页数据（不带日期过滤，在代码中过滤）"""
+    """抓取单页数据"""
     params = {
         "tags": TAGS,
         "limit": LIMIT,
@@ -236,11 +237,15 @@ def main():
         print("⛔ 请检查 config.py 中的 BOT_TOKEN 是否正确！")
         sys.exit(1)
 
-    today = datetime.now(TZ).strftime("%Y-%m-%d")
-    print(f"📅 当天日期: {today}")
+    now = datetime.now(TZ)
+    today = now.strftime("%Y-%m-%d")
+    start_date = (now - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
+
+    print(f"📅 当前日期: {today}")
+    print(f"📅 回溯到: {start_date} (最近 {DAYS_BACK} 天)")
     print(f"🏷️  标签: {TAGS}")
 
-    db = load_db(today)
+    db = load_db()
     print(f"💾 已有记录: {len(db)} 条")
 
     total_sent = 0
@@ -267,9 +272,9 @@ def main():
 
             print(f"📬 获取到 {len(posts)} 条结果")
 
-            today_count = 0
+            in_range_count = 0
             old_count = 0
-            consecutive_old = 0  # 连续非当天计数
+            consecutive_old = 0
 
             for p in posts:
                 pid = str(p.get("id", ""))
@@ -278,23 +283,23 @@ def main():
                 if not pid:
                     continue
 
-                # 检查是否是今天的内容
-                if not is_today(created_at):
+                # 检查是否在时间范围内
+                if not is_within_range(created_at):
                     created_str = datetime.fromtimestamp(created_at, tz=TZ).strftime("%Y-%m-%d %H:%M")
-                    print(f"  ⏭️  非当天内容: {pid} (创建于 {created_str})")
+                    print(f"  ⏭️  超出范围: {pid} (创建于 {created_str})")
                     old_count += 1
                     consecutive_old += 1
-                    # 连续 5 个非当天内容，停止翻页
+                    # 连续 5 个超出范围，停止翻页
                     if consecutive_old >= 5:
-                        print(f"  🛑 连续 {consecutive_old} 个非当天内容，停止翻页")
-                        save_db(db, today)
+                        print(f"  🛑 连续 {consecutive_old} 个超出范围，停止翻页")
+                        save_db(db)
                         print(f"\n🎉 完成！共发送 {total_sent} 条新内容")
                         print(f"💾 数据库现有 {len(db)} 条记录")
                         return
                     continue
 
-                today_count += 1
-                consecutive_old = 0  # 重置连续计数
+                in_range_count += 1
+                consecutive_old = 0
 
                 if pid in db:
                     print(f"  ⏭️  跳过已发送: {pid}")
@@ -302,7 +307,7 @@ def main():
 
                 # jpeg_url: JPEG 版原图，作为预览图发送
                 jpeg = p.get("jpeg_url") or p.get("sample_url") or p.get("preview_url")
-                # file_url: 原始文件（可能是 PNG），作为文件发送
+                # file_url: 原始文件，作为文件发送
                 original = p.get("file_url")
 
                 if not jpeg or not original:
@@ -334,7 +339,7 @@ def main():
 
                 print(f"  📤 发送: {pid} (rating:{rating})")
 
-                # 发送 JPEG 版原图作为预览图（清晰）
+                # 发送 JPEG 版原图作为预览图
                 tg_send_photo(jpeg, caption)
 
                 # 检查原始文件大小
@@ -352,21 +357,21 @@ def main():
                 db.add(pid)
                 total_sent += 1
 
-            print(f"  📊 本页统计: 当天 {today_count} 条, 非当天 {old_count} 条")
+            print(f"  📊 本页统计: 范围内 {in_range_count} 条, 超出范围 {old_count} 条")
 
-            # 如果本页没有当天内容，说明已经超出今天的范围，停止翻页
-            if today_count == 0 and old_count > 0:
-                print(f"📭 本页无当天内容，停止翻页")
+            # 如果本页没有范围内的内容，停止翻页
+            if in_range_count == 0 and old_count > 0:
+                print(f"📭 本页无范围内内容，停止翻页")
                 site_succeeded = True
                 break
 
-            # 页间保存，防止中途失败丢数据
-            save_db(db, today)
+            # 页间保存
+            save_db(db)
 
         if not site_succeeded:
             site_succeeded = True
 
-    save_db(db, today)
+    save_db(db)
     print(f"\n🎉 完成！共发送 {total_sent} 条新内容")
     print(f"💾 数据库现有 {len(db)} 条记录")
 
