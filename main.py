@@ -269,6 +269,7 @@ def main():
 
             today_count = 0
             old_count = 0
+            consecutive_old = 0  # 连续非当天计数
 
             for p in posts:
                 pid = str(p.get("id", ""))
@@ -282,9 +283,18 @@ def main():
                     created_str = datetime.fromtimestamp(created_at, tz=TZ).strftime("%Y-%m-%d %H:%M")
                     print(f"  ⏭️  非当天内容: {pid} (创建于 {created_str})")
                     old_count += 1
+                    consecutive_old += 1
+                    # 连续 5 个非当天内容，停止翻页
+                    if consecutive_old >= 5:
+                        print(f"  🛑 连续 {consecutive_old} 个非当天内容，停止翻页")
+                        save_db(db, today)
+                        print(f"\n🎉 完成！共发送 {total_sent} 条新内容")
+                        print(f"💾 数据库现有 {len(db)} 条记录")
+                        return
                     continue
 
                 today_count += 1
+                consecutive_old = 0  # 重置连续计数
 
                 if pid in db:
                     print(f"  ⏭️  跳过已发送: {pid}")
