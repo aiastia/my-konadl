@@ -110,6 +110,29 @@ def save_db(db):
         json.dump({"ids": list(db)}, f, indent=2)
 
 
+def tg_send_message(text):
+    """发送纯文本消息到 Telegram"""
+    try:
+        r = requests.post(
+            f"{TG_API}/sendMessage",
+            data={
+                "chat_id": CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML"
+            },
+            timeout=10
+        )
+        if r.status_code == 200:
+            print(f"✅ 消息发送成功")
+            return True
+        else:
+            print(f"❌ 消息发送失败: {r.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"❌ 消息发送异常: {e}")
+        return False
+
+
 def tg_send_photo(image_url, caption=""):
     """下载预览图并发送到 Telegram"""
     print(f"  ⬇️  下载预览图...")
@@ -247,6 +270,15 @@ def main():
 
     db = load_db()
     print(f"💾 已有记录: {len(db)} 条")
+
+    # 发送启动通知消息
+    run_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    startup_msg = (
+        f"🚀 <b>KonaDL 启动</b>\n"
+        f"📅 <b>时间</b>: {run_time}\n"
+    )
+    print(f"📤 发送启动通知...")
+    tg_send_message(startup_msg)
 
     total_sent = 0
     site_succeeded = False
