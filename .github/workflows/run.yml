@@ -2,10 +2,11 @@ name: crawler
 
 on:
   schedule:
-    # 每天 UTC 2:00（北京时间 10:00）
-    - cron: "0 2 * * *"
-    # 每天 UTC 14:00（北京时间 22:00）
-    - cron: "0 14 * * *"
+    # ⚠️ GitHub Actions cron 有延迟（通常 5~30 分钟，高峰期更长）
+    # 目标北京时间 10:00 → 提前 30 分钟调度（UTC 1:30 = 北京 9:30）
+    - cron: "30 1 * * *"
+    # 目标北京时间 22:00 → 提前 30 分钟调度（UTC 13:30 = 北京 21:30）
+    - cron: "30 13 * * *"
   workflow_dispatch:
 
 permissions:
