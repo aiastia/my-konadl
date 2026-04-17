@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
-from config import DAYS_BACK
+from config import DAYS_BACK, DB_MAX_IDS
 
 # 时区：Asia/Shanghai (UTC+8)
 TZ = timezone(timedelta(hours=8))
@@ -94,9 +94,16 @@ def load_db():
 
 
 def save_db(db):
-    """保存已发送 ID 数据库"""
+    """保存已发送 ID 数据库，超过上限时自动清理旧记录"""
+    ids = list(db)
+    if len(ids) > DB_MAX_IDS:
+        # ID 为数字字符串，按数值降序排列，保留最新的
+        ids.sort(key=lambda x: int(x) if x.isdigit() else x, reverse=True)
+        removed = len(ids) - DB_MAX_IDS
+        ids = ids[:DB_MAX_IDS]
+        print(f"🧹 数据库清理: {removed} 条旧记录已移除，保留 {len(ids)} 条")
     with open("db.json", "w") as f:
-        json.dump({"ids": list(db)}, f, indent=2)
+        json.dump({"ids": ids}, f, indent=2)
 
 
 def is_within_range(timestamp):
